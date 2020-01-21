@@ -11,21 +11,14 @@ namespace Discord.Addons.Interactive
         /// <summary>
         /// The criteria.
         /// </summary>
-        private readonly List<ICriterion<T>> criteria = new List<ICriterion<T>>();
+        private readonly IEnumerable<ICriterion<T>> criteria;
 
-        /// <summary>
-        /// adds a criterion
-        /// </summary>
-        /// <param name="criterion">
-        /// The criterion.
-        /// </param>
-        /// <returns>
-        /// The <see cref="criterion"/>.
-        /// </returns>
-        public Criteria<T> AddCriterion(ICriterion<T> criterion)
-        {
-            criteria.Add(criterion);
-            return this;
+        public Criteria(params ICriterion<T>[] criteria) {
+            this.criteria = criteria;
+        }
+
+        public Criteria(IEnumerable<ICriterion<T>> criteria) {
+            this.criteria = criteria;
         }
 
         /// <summary>
