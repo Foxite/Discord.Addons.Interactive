@@ -10,6 +10,7 @@
     using Discord.WebSocket;
 
     using Microsoft.Extensions.DependencyInjection;
+    using Microsoft.Extensions.DependencyInjection.Extensions;
 
     /// <summary>
     /// The program.
@@ -55,7 +56,7 @@
                 LogLevel = LogSeverity.Info
             });
 
-            var token = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "setup/token.txt"));
+			var token = ""; // TODO
 
             try
             {
