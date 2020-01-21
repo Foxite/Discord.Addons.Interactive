@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Addons.Interactive;
@@ -11,6 +12,8 @@ namespace SampleBot {
 	public class BlackjackModule : InteractiveBase<SocketCommandContext> {
 		private Random m_RNG;
 		private List<Card> m_Deck = new List<Card>();
+
+		private string GetDisplayName(IUser user) => (user as IGuildUser)?.Nickname ?? user.Username;
 
 		private Criteria<SocketMessage> GetStandardCriteria(IEnumerable<IUser> players, ICriterion<SocketMessage> extraCriterion) =>
 			new Criteria<SocketMessage>(
@@ -34,9 +37,9 @@ namespace SampleBot {
 			await foreach (SocketMessage msg in WaitAllPlayers(users, GetStandardCriteria(users, new EnsureOneOfCriterion(new[] { positive, negative }.SelectMany(s => s))))) {
 				if (positive.Contains(msg.Content.ToLower())) {
 					joinedUsers.Add(msg.Author);
-					await ReplyAsync("Confirmed: " + ((msg.Author as IGuildUser)?.Nickname ?? msg.Author.Username) + " is in the game.");
+					await ReplyAsync("Confirmed: " + GetDisplayName(msg.Author) + " is in the game.");
 				} else if (negative.Contains(msg.Content.ToLower())) {
-					await ReplyAsync("Confirmed: " + ((msg.Author as IGuildUser)?.Nickname ?? msg.Author.Username) + " is not playing.");
+					await ReplyAsync("Confirmed: " + GetDisplayName(msg.Author) + " is not playing.");
 				}
 			}
 			if (joinedUsers.Count == 0) {
@@ -90,15 +93,95 @@ namespace SampleBot {
 				ShuffleDeck();
 
 				var players = users.Select(user => new BlackjackPlayer(user, DrawCard(), DrawCard())).ToArray();
+
+				IEnumerable<BlackjackPlayer> playersInRound = players;
+				int pot = 0;
+
+				BlackjackPlayer getPlayer(IUser user) => playersInRound.First(player => player.DiscordUser == user);
+
 				foreach (var player in players) {
 					await (await player.DiscordUser.GetOrCreateDMChannelAsync()).SendMessageAsync("You were dealt: " + player.PrivateCards.ToString());
 				}
 
-				// Who wants to bet?
+				await ReplyAsync("All players were dealt their two starting cards. Who wants to bet?");
+
+				async Task askBetAsync() {
+					var betRegex = new Regex("(i )?bet (?<amount>[0-9]+)");
+					await foreach (SocketMessage msg in WaitAllPlayers(playersInRound.Select(player => player.DiscordUser), new ORCriteria<SocketMessage>(
+							new EnsureOneOfCriterion("fold", "i fold"),
+							new RegexCriterion(betRegex)
+						))) {
+						BlackjackPlayer userAsPlayer = getPlayer(msg.Author);
+						if (msg.Content.Contains("fold")) {
+							await ReplyAsync("Confirmed: " + GetDisplayName(msg.Author) + " folds.");
+							playersInRound = playersInRound.Where(player => player != userAsPlayer);
+						} else {
+							int betAmount = int.Parse(betRegex.Match(msg.Content).Groups["amount"].Value); // TODO fix potential errors
+							string response = "";
+							if (betAmount > userAsPlayer.ChipCount) {
+								response = "That's more than you have, but I'll let you go all in.";
+								betAmount = userAsPlayer.ChipCount;
+							}
+							userAsPlayer.ChipCount -= betAmount;
+							response += "Confirmed: " + GetDisplayName(msg.Author);
+							if (userAsPlayer.ChipCount == 0) {
+								response += " goes all in.";
+							} else {
+								response += " bets " + betAmount + ". ";
+							}
+							pot += betAmount;
+
+							await ReplyAsync(response);
+						}
+					}
+				}
+				await askBetAsync();
+
 				// Who wants to hit?
-				// Who wants to bet?
+				string response = "Everyone has made their move. ";
+				foreach (BlackjackPlayer player in playersInRound) {
+					await ReplyAsync(response + GetDisplayName(player.DiscordUser) + ", do you want to be hit, or pass?");
+					response = "";
+					SocketMessage msg;
+					do {
+						msg = await NextMessageAsync(new EnsureOneOfCriterion("hit", "hit me", "pass", "i pass"));
+						if (msg.Content.StartsWith("hit")) {
+							Card dealtCard = DrawCard();
+							player.PublicCards.Add(dealtCard);
+							await ReplyAsync("You were dealt: " + dealtCard);
+						}
+					} while (msg.Content.StartsWith("hit"));
+				}
+
+				await ReplyAsync("Everyone has made their move. Does anyone want to change their bets?");
+				await askBetAsync();
+
 				// Reveal cards
+				response = "That concludes this round. These were the cards:";
+				foreach (BlackjackPlayer player in playersInRound) {
+					response += "\n" + GetDisplayName(player.DiscordUser) + ": " + string.Join(", ", new[] { player.PrivateCards.Item1, player.PrivateCards.Item2 }.Concat(player.PublicCards))
+					 + ". That is a total value of " + player.Value + ".";
+					if (player.Value > 21) {
+						response += " That's greater than 21.";
+					}
+					if (player.Value == 21) {
+						response += " That's blackjack.";
+					}
+				}
+
 				// Decide round winner
+				BlackjackPlayer winner = playersInRound.Aggregate((current, next) => {
+					if (next.Value <= 21 && next.Value > current.Value) {
+						return next;
+					}
+					return current;
+				});
+				winner.ChipCount += pot;
+
+				response = GetDisplayName(winner.DiscordUser) + " wins this round and the pot of " + pot + ".\n";
+				response += string.Join("\n", playersInRound.Where(player => player.ChipCount == 0).Select(player => GetDisplayName(player.DiscordUser) + " has lost this game."));
+				await ReplyAsync(response);
+
 				// If only one remaining: end loop
 			}
 		}

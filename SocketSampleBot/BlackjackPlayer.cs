@@ -7,6 +7,7 @@ namespace SampleBot {
 		public (Card, Card) PrivateCards { get; }
 		public List<Card> PublicCards { get; }
 		public IUser DiscordUser { get; }
+		public int ChipCount { get; set; }
 		public int Value {
 			get {
 				int value = 0;
@@ -22,7 +23,8 @@ namespace SampleBot {
 						}
 					}
 				}
-
+				
+				// TODO if you have 4 aces and a base value of 10, we should count them as 4 rather than 13
 				for (int i = aces - 1; i >= 0; i--) {
 					if (value < 11) {
 						value += 11;
