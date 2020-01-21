@@ -90,8 +90,10 @@ namespace SampleBot {
 			m_RNG = new Random();
 			m_Deck = new List<Card>(52);
 			bool gameInProgress = true;
+			var betRegex = new Regex("(i )?bet (?<amount>[0-9]+)");
 
 			while (gameInProgress) {
+				#region Start round
 				m_Deck.Clear();
 				for (int i = 1; i <= 13; i++) {
 					m_Deck.Add((Card) i);
@@ -107,47 +109,56 @@ namespace SampleBot {
 
 				IEnumerable<BlackjackPlayer> playersInRound = players;
 				int pot = 0;
+				int minimumBet = 1;
 
 				BlackjackPlayer getPlayer(IUser user) => playersInRound.First(player => player.DiscordUser == user);
+
+				async Task PlaceBetsAsync() {
+					await foreach (SocketMessage msg in WaitAllPlayers(playersInRound.Select(player => player.DiscordUser), new ORCriteria<SocketMessage>(
+						new EnsureOneOfCriterion("no", "nope", "pass", "fold", "i fold"),
+						new RegexCriterion(betRegex)
+					))) {
+						BlackjackPlayer player = getPlayer(msg.Author);
+						if (msg.Content.ToLower().Contains("fold")) {
+							await ReplyAsync("Confirmed: " + GetDisplayName(msg.Author) + " folds.");
+							playersInRound = playersInRound.Where(aPlayer => aPlayer != player);
+						} else if (msg.Content.ToLower().Contains("bet")) {
+							int betAmount = int.Parse(betRegex.Match(msg.Content.ToLower()).Groups["amount"].Value);
+							response = "";
+							if (betAmount > player.ChipCount) {
+								response = "That's more than you have, but I'll let you go all in.";
+								betAmount = player.ChipCount;
+							}
+							player.ChipCount -= betAmount;
+							response += "Confirmed: " + GetDisplayName(msg.Author);
+							if (player.ChipCount == 0) {
+								response += " goes all in.";
+							} else {
+								response += " bets " + betAmount;
+								if (player.BetAmount > 0) {
+									response += " on top of their existing bet of " + player.BetAmount + ", for a total bet of " + (player.BetAmount + betAmount);
+								}
+								response += ".";
+							}
+							pot += betAmount;
+							player.BetAmount = +betAmount;
+							response += " That makes the pot " + pot + " chips large.";
+							minimumBet = Math.Max(minimumBet, player.BetAmount);
+
+							await ReplyAsync(response);
+						} else {
+							await ReplyAsync("Confirmed: " + GetDisplayName(player.DiscordUser) + " does not change their bet.");
+						}
+					}
+				}
 
 				foreach (var player in players) {
 					await (await player.DiscordUser.GetOrCreateDMChannelAsync()).SendMessageAsync("You were dealt: " + player.PrivateCards.ToString());
 				}
+				#endregion
 
 				await ReplyAsync("All players were dealt their two starting cards. Who wants to bet?");
-
-				#region Initial bet
-				var betRegex = new Regex("(i )?bet (?<amount>[0-9]+)");
-				await foreach (SocketMessage msg in WaitAllPlayers(playersInRound.Select(player => player.DiscordUser), new ORCriteria<SocketMessage>(
-						new EnsureOneOfCriterion("fold", "i fold"),
-						new RegexCriterion(betRegex)
-					))) {
-					BlackjackPlayer userAsPlayer = getPlayer(msg.Author);
-					if (msg.Content.ToLower().Contains("fold")) {
-						await ReplyAsync("Confirmed: " + GetDisplayName(msg.Author) + " folds.");
-						playersInRound = playersInRound.Where(player => player != userAsPlayer);
-					} else {
-						int betAmount = int.Parse(betRegex.Match(msg.Content.ToLower()).Groups["amount"].Value); // TODO fix potential errors
-						response = "";
-						if (betAmount > userAsPlayer.ChipCount) {
-							response = "That's more than you have, but I'll let you go all in.";
-							betAmount = userAsPlayer.ChipCount;
-						}
-						userAsPlayer.ChipCount -= betAmount;
-						response += "Confirmed: " + GetDisplayName(msg.Author);
-						if (userAsPlayer.ChipCount == 0) {
-							response += " goes all in.";
-						} else {
-							response += " bets " + betAmount + ".";
-						}
-						pot += betAmount;
-						userAsPlayer.BetAmount = betAmount;
-						response += " That makes the pot " + pot + " chips large.";
-
-						await ReplyAsync(response);
-					}
-				}
-				#endregion
+				await PlaceBetsAsync();
 
 				if (playersInRound.Count() > 1) {
 					#region Hits
@@ -167,38 +178,12 @@ namespace SampleBot {
 					}
 					#endregion
 
-					await ReplyAsync("Everyone has made their move. Does anyone want to change their bets?");
 					#region Second bets
-					await foreach (SocketMessage msg in WaitAllPlayers(playersInRound.Select(player => player.DiscordUser), new ORCriteria<SocketMessage>(
-							new EnsureOneOfCriterion("no", "nope", "pass"),
-							new RegexCriterion(betRegex)
-						))) {
-						BlackjackPlayer player = getPlayer(msg.Author);
-						if (msg.Content.ToLower().Contains("bet")) {
-							int addBetAmount = int.Parse(betRegex.Match(msg.Content.ToLower()).Groups["amount"].Value); // TODO fix potential errors
-							response = "";
-							if (addBetAmount > player.ChipCount) {
-								response = "That's more than you have, but I'll let you go all in.";
-								addBetAmount = player.ChipCount;
-							}
-							player.ChipCount -= addBetAmount;
-							response += "Confirmed: " + GetDisplayName(msg.Author);
-							if (player.ChipCount == 0) {
-								response += " goes all in.";
-							} else {
-								response += " bets " + addBetAmount + "on top of their existing bet of " + player.BetAmount + ", for a total bet of " + (player.BetAmount + addBetAmount) + ".";
-							}
-							pot += addBetAmount;
-							player.BetAmount += addBetAmount;
-							response += " That makes the pot " + pot + " chips large.";
+					await ReplyAsync("Everyone has made their move. Does anyone want to change their bets?");
+					await PlaceBetsAsync();
 
-							await ReplyAsync(response);
-						} else {
-							await ReplyAsync("Confirmed: " + GetDisplayName(player.DiscordUser) + " does not change their bet.");
-						}
-					}
-					#endregion
 					response = "";
+					#endregion
 				} else {
 					response = "Everyone except one person has folded.\n";
 				}
