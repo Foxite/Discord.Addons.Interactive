@@ -2,6 +2,7 @@
 namespace Discord.Addons.Interactive
 {
     using System.Collections.Generic;
+    using System.Linq;
     using System.Threading.Tasks;
 
     using Discord.Commands;
@@ -11,14 +12,19 @@ namespace Discord.Addons.Interactive
         /// <summary>
         /// The criteria.
         /// </summary>
-        private readonly IEnumerable<ICriterion<T>> criteria;
+        private readonly List<ICriterion<T>> criteria;
 
         public Criteria(params ICriterion<T>[] criteria) {
-            this.criteria = criteria;
+            this.criteria = criteria.ToList();
         }
 
         public Criteria(IEnumerable<ICriterion<T>> criteria) {
-            this.criteria = criteria;
+            this.criteria = criteria.ToList();
+        }
+
+        public Criteria<T> AddCriterion(ICriterion<T> criterion) {
+            criteria.Add(criterion);
+            return this;
         }
 
         /// <summary>

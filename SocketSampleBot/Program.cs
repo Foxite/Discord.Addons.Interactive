@@ -33,7 +33,7 @@
         /// <param name="args">
         /// The args.
         /// </param>
-        public static void Main(string[] args)
+        public static void Main()
         {
             new Program().StartAsync().GetAwaiter().GetResult();
         }

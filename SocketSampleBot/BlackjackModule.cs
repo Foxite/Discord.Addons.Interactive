@@ -9,6 +9,15 @@ using Discord.WebSocket;
 
 namespace SampleBot {
 	public class BlackjackModule : InteractiveBase<SocketCommandContext> {
+		private Random m_RNG;
+		private List<Card> m_Deck = new List<Card>();
+
+		private Criteria<SocketMessage> GetStandardCriteria(IEnumerable<IUser> players, ICriterion<SocketMessage> extraCriterion) =>
+			new Criteria<SocketMessage>(
+				new ORCriteria<SocketMessage>(players.Select(user => new EnsureFromUserCriterion(user.Id))),
+				new EnsureSourceChannelCriterion()
+			).AddCriterion(extraCriterion);
+
 		[Command("play blackjack", RunMode = RunMode.Async)]
 		public async Task PlayBlackjack(params IUser[] users) {
 			if (users == null) {
@@ -22,11 +31,7 @@ namespace SampleBot {
 			string[] negative = new[] { "no", "ignore", "deny", "refuse" };
 
 			var joinedUsers = new HashSet<IUser>();
-			await foreach (SocketMessage msg in WaitAllPlayers(users, new Criteria<SocketMessage>(
-					new EnsureSourceUserCriterion(),
-					new EnsureSourceChannelCriterion(),
-					new EnsureOneOfCriterion(new[] { positive, negative }.SelectMany(s => s))
-				))) {
+			await foreach (SocketMessage msg in WaitAllPlayers(users, GetStandardCriteria(users, new EnsureOneOfCriterion(new[] { positive, negative }.SelectMany(s => s))))) {
 				if (positive.Contains(msg.Content.ToLower())) {
 					joinedUsers.Add(msg.Author);
 					await ReplyAsync("Confirmed: " + ((msg.Author as IGuildUser)?.Nickname ?? msg.Author.Username) + " is in the game.");
@@ -37,6 +42,7 @@ namespace SampleBot {
 			if (joinedUsers.Count == 0) {
 				await ReplyAsync("Can't play the game because nobody has accepted the invitation.");
 			} else {
+				await ReplyAsync("Let's play blackjack.");
 				await PlayBlackjack(joinedUsers);
 			}
 		}
@@ -49,8 +55,52 @@ namespace SampleBot {
 			}
 		}
 
-		private async Task PlayBlackjack(IEnumerable<IUser> users) {
+		private void ShuffleDeck() {
+			int n = m_Deck.Count;
+			while (n > 1) {
+				n--;
+				int k = m_RNG.Next(n + 1);
+				Card value = m_Deck[k];
+				m_Deck[k] = m_Deck[n];
+				m_Deck[n] = value;
+			}
+		}
 
+		private Card DrawCard() {
+			// TODO fix index error
+			var ret = m_Deck[m_Deck.Count - 1];
+			m_Deck.RemoveAt(m_Deck.Count - 1);
+			return ret;
+		}
+
+		private async Task PlayBlackjack(IEnumerable<IUser> users) {
+			m_RNG = new Random();
+
+			m_Deck = new List<Card>(52);
+			bool gameInProgress = true;
+
+			while (gameInProgress) {
+				m_Deck.Clear();
+				for (int i = 0; i < 13; i++) {
+					m_Deck.Add((Card) i);
+					m_Deck.Add((Card) i);
+					m_Deck.Add((Card) i);
+					m_Deck.Add((Card) i);
+				}
+				ShuffleDeck();
+
+				var players = users.Select(user => new BlackjackPlayer(user, DrawCard(), DrawCard())).ToArray();
+				foreach (var player in players) {
+					await (await player.DiscordUser.GetOrCreateDMChannelAsync()).SendMessageAsync("You were dealt: " + player.PrivateCards.ToString());
+				}
+
+				// Who wants to bet?
+				// Who wants to hit?
+				// Who wants to bet?
+				// Reveal cards
+				// Decide round winner
+				// If only one remaining: end loop
+			}
 		}
 	}
 }
