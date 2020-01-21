@@ -113,9 +113,9 @@ namespace SampleBot {
 
 				BlackjackPlayer getPlayer(IUser user) => playersInRound.First(player => player.DiscordUser == user);
 
-				async Task PlaceBetsAsync() {
+				async Task PlaceBetsAsync(bool isInitialBet) {
 					await foreach (SocketMessage msg in WaitAllPlayers(playersInRound.Select(player => player.DiscordUser), new ORCriteria<SocketMessage>(
-						new EnsureOneOfCriterion("no", "nope", "pass", "fold", "i fold"),
+						new EnsureOneOfCriterion(new[] { "pass", "fold", "i fold" }.Concat(isInitialBet ? Array.Empty<string>() : new[] { "no", "nope" })),
 						new RegexCriterion(betRegex)
 					))) {
 						BlackjackPlayer player = getPlayer(msg.Author);
@@ -157,8 +157,10 @@ namespace SampleBot {
 				}
 				#endregion
 
-				await ReplyAsync("All players were dealt their two starting cards. Who wants to bet?");
-				await PlaceBetsAsync();
+				await ReplyAsync("All players were dealt their two starting cards. The chip counts are:\n" +
+					string.Join("\n", playersInRound.Select(player => GetDisplayName(player.DiscordUser) + ": " + player.ChipCount))
+					+ " Who wants to bet?");
+				await PlaceBetsAsync(true);
 
 				if (playersInRound.Count() > 1) {
 					#region Hits
@@ -180,7 +182,7 @@ namespace SampleBot {
 
 					#region Second bets
 					await ReplyAsync("Everyone has made their move. Does anyone want to change their bets?");
-					await PlaceBetsAsync();
+					await PlaceBetsAsync(false);
 
 					response = "";
 					#endregion
