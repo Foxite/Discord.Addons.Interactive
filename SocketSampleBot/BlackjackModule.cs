@@ -12,6 +12,7 @@ namespace SampleBot {
 	public class BlackjackModule : InteractiveBase<SocketCommandContext> {
 		private Random m_RNG;
 		private List<Card> m_Deck = new List<Card>();
+		private const int InitialChipCount = 200;
 
 		private string GetDisplayName(IUser user) => (user as IGuildUser)?.Nickname ?? user.Username;
 
@@ -82,6 +83,10 @@ namespace SampleBot {
 			m_Deck = new List<Card>(52);
 			bool gameInProgress = true;
 
+			var players = users.Select(user => new BlackjackPlayer(user, InitialChipCount) {
+				PrivateCards = (DrawCard(), DrawCard())
+			}).ToArray();
+
 			while (gameInProgress) {
 				m_Deck.Clear();
 				for (int i = 0; i < 13; i++) {
@@ -91,8 +96,6 @@ namespace SampleBot {
 					m_Deck.Add((Card) i);
 				}
 				ShuffleDeck();
-
-				var players = users.Select(user => new BlackjackPlayer(user, DrawCard(), DrawCard())).ToArray();
 
 				IEnumerable<BlackjackPlayer> playersInRound = players;
 				int pot = 0;
@@ -116,20 +119,24 @@ namespace SampleBot {
 							await ReplyAsync("Confirmed: " + GetDisplayName(msg.Author) + " folds.");
 							playersInRound = playersInRound.Where(player => player != userAsPlayer);
 						} else {
-							int betAmount = int.Parse(betRegex.Match(msg.Content).Groups["amount"].Value); // TODO fix potential errors
+							int newBetAmount = int.Parse(betRegex.Match(msg.Content).Groups["amount"].Value); // TODO fix potential errors
 							string response = "";
-							if (betAmount > userAsPlayer.ChipCount) {
+							if (newBetAmount > userAsPlayer.ChipCount) {
 								response = "That's more than you have, but I'll let you go all in.";
-								betAmount = userAsPlayer.ChipCount;
+								newBetAmount = userAsPlayer.ChipCount;
 							}
-							userAsPlayer.ChipCount -= betAmount;
+							userAsPlayer.ChipCount -= newBetAmount;
 							response += "Confirmed: " + GetDisplayName(msg.Author);
 							if (userAsPlayer.ChipCount == 0) {
 								response += " goes all in.";
 							} else {
-								response += " bets " + betAmount + ". ";
+								response += " bets " + newBetAmount + (userAsPlayer.BetAmount != 0
+									? "on top of their existing bet of " + userAsPlayer.BetAmount + ", for a total bet of " + (userAsPlayer.BetAmount + newBetAmount)
+									: "") + ".";
 							}
-							pot += betAmount;
+							pot += newBetAmount;
+							userAsPlayer.BetAmount = newBetAmount;
+							response += " That makes the pot " + pot + " chips large.";
 
 							await ReplyAsync(response);
 						}
@@ -144,7 +151,7 @@ namespace SampleBot {
 					response = "";
 					SocketMessage msg;
 					do {
-						msg = await NextMessageAsync(new EnsureOneOfCriterion("hit", "hit me", "pass", "i pass"));
+						msg = await NextMessageAsync(new Criteria<SocketMessage>(new EnsureFromUserCriterion(player.DiscordUser.Id), new EnsureOneOfCriterion("hit", "hit me", "pass", "i pass")));
 						if (msg.Content.StartsWith("hit")) {
 							Card dealtCard = DrawCard();
 							player.PublicCards.Add(dealtCard);
@@ -163,26 +170,43 @@ namespace SampleBot {
 					 + ". That is a total value of " + player.Value + ".";
 					if (player.Value > 21) {
 						response += " That's greater than 21.";
-					}
-					if (player.Value == 21) {
+					} else if (player.Value == 21) {
 						response += " That's blackjack.";
 					}
 				}
 
 				// Decide round winner
-				BlackjackPlayer winner = playersInRound.Aggregate((current, next) => {
-					if (next.Value <= 21 && next.Value > current.Value) {
+				BlackjackPlayer winner = playersInRound.Aggregate((BlackjackPlayer) null, (current, next) => {
+					if (next.Value <= 21 && (current == null || next.Value > current.Value)) {
 						return next;
 					}
 					return current;
 				});
-				winner.ChipCount += pot;
+				if (winner == null) {
+					response = "It appears there is no winner! Everyone gets their chips back.");
+					foreach (BlackjackPlayer player in playersInRound) {
+						player.ChipCount += player.BetAmount;
+					}
+				} else {
+					winner.ChipCount += pot;
+					response = GetDisplayName(winner.DiscordUser) + " wins this round and the pot of " + pot + ".\n";
+					response += string.Join("\n", playersInRound.Where(player => player.ChipCount == 0).Select(player => GetDisplayName(player.DiscordUser) + " has lost this game."));
+					
+					if (playersInRound.Where(player => player.ChipCount == 21).Count() > 1) {
+						response += "\nIt appears there was more than one player with a score of 21. This game is still in Beta™, so please forgive that I let the wrong player win.";
+					}
+				}
+				foreach (BlackjackPlayer player in playersInRound) {
+					player.BetAmount = 0;
+				}
+				players = players.Where(player => player.ChipCount > 0).ToArray();
+				if (players.Length <= 1) {
+					gameInProgress = false;
+					response += "\nAnd with that, " + GetDisplayName(players[0].DiscordUser) + " is the only remaining player and wins the game.";
+				}
 
-				response = GetDisplayName(winner.DiscordUser) + " wins this round and the pot of " + pot + ".\n";
-				response += string.Join("\n", playersInRound.Where(player => player.ChipCount == 0).Select(player => GetDisplayName(player.DiscordUser) + " has lost this game."));
+				playersInRound = players;
 				await ReplyAsync(response);
-
-				// If only one remaining: end loop
 			}
 		}
 	}

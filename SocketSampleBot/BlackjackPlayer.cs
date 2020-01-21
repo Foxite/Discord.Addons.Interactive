@@ -4,10 +4,11 @@ using Discord;
 
 namespace SampleBot {
 	public class BlackjackPlayer {
-		public (Card, Card) PrivateCards { get; }
-		public List<Card> PublicCards { get; }
 		public IUser DiscordUser { get; }
+		public (Card, Card) PrivateCards { get; set; }
+		public List<Card> PublicCards { get; }
 		public int ChipCount { get; set; }
+		public int BetAmount { get; set; }
 		public int Value {
 			get {
 				int value = 0;
@@ -36,9 +37,9 @@ namespace SampleBot {
 			}
 		}
 
-		public BlackjackPlayer(IUser user, Card privateCard1, Card privateCard2) {
+		public BlackjackPlayer(IUser user, int chipCount) {
 			DiscordUser = user;
-			PrivateCards = (privateCard1, privateCard2);
+			ChipCount = chipCount;
 			PublicCards = new List<Card>();
 		}
 	}
