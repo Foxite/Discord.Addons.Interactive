@@ -183,7 +183,7 @@ namespace SampleBot {
 					return current;
 				});
 				if (winner == null) {
-					response = "It appears there is no winner! Everyone gets their chips back.");
+					response = "It appears there is no winner! Everyone gets their chips back.";
 					foreach (BlackjackPlayer player in playersInRound) {
 						player.ChipCount += player.BetAmount;
 					}
